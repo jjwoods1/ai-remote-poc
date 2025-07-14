@@ -3,7 +3,7 @@ import time
 import subprocess
 import requests
 
-BACKEND_URL = "http://<your-backend-ip>:8000"
+BACKEND_URL = "https://ai-remote-poc-production.up.railway.app/api/agent"
 
 def fetch_task():
     try:

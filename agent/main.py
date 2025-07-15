@@ -3,7 +3,7 @@ import time
 import subprocess
 import requests
 
-BACKEND_URL = "https://ai-remote-poc-production.up.railway.app/api/agent"
+BACKEND_URL = "https://ai-remote-backend-production.up.railway.app/api/agent"
 
 def fetch_task():
     try:
@@ -34,3 +34,4 @@ if __name__ == "__main__":
             output = run_command(task["command"])
             submit_result(task["task_id"], output)
         time.sleep(5)
+

@@ -4,11 +4,9 @@ import uuid
 import os
 import json
 
-# The backend URL
 BASE_URL = "https://ai-remote-backend-production.up.railway.app/api/agent"
-
-# Persistent agent ID
 AGENT_ID_FILE = "agent_id.txt"
+
 if os.path.exists(AGENT_ID_FILE):
     with open(AGENT_ID_FILE, "r") as f:
         agent_id = f.read().strip()
@@ -22,24 +20,33 @@ print(f"Agent ID: {agent_id}")
 def poll():
     while True:
         try:
-            # Poll for task
+            print("Polling for task...")
             response = requests.get(f"{BASE_URL}/task/{agent_id}")
-            if response.status_code == 200 and response.json().get("command"):
-                command = response.json()["command"]
-                print(f"Received command: {command}")
-                output = os.popen(command).read()
-                
-                result_payload = {
-                    "task_id": response.json()["task_id"],
-                    "output": output
-                }
-                requests.post(f"{BASE_URL}/result", json=result_payload)
+            if response.status_code == 200:
+                data = response.json()
+                command = data.get("command")
+                if command:
+                    print(f"Received command: {command}")
+                    output = os.popen(command).read()
+
+                    result_payload = {
+                        "task_id": data["task_id"],
+                        "output": output
+                    }
+
+                    print(f"Sending result for task {data['task_id']}")
+                    res = requests.post(f"{BASE_URL}/result", json=result_payload)
+                    print(f"Result sent. Status: {res.status_code}")
+                else:
+                    print("No command received.")
+            else:
+                print(f"No task. Server responded: {response.status_code}")
         except Exception as e:
             print(f"Unexpected error: {e}")
 
         time.sleep(5)
 
-# Register with backend
+# Register the agent
 try:
     response = requests.post(f"{BASE_URL}/register", json={"agent_id": agent_id})
     if response.status_code == 200:

@@ -1,71 +1,65 @@
-import requests
+import os
 import time
 import uuid
-import os
+import requests
 import subprocess
+import ast
 import json
+from redis import Redis
 
-# Your deployed backend's agent endpoint
 BASE_URL = "https://ai-remote-backend-production.up.railway.app/api/agent"
-
-# Generate or load agent ID (this ensures a persistent unique ID)
+REDIS_URL = os.getenv("REDISHOST", "redis://localhost:6379")
 AGENT_ID_FILE = "agent_id.txt"
+
+# Get or create persistent agent ID
 if os.path.exists(AGENT_ID_FILE):
     with open(AGENT_ID_FILE, "r") as f:
-        AGENT_ID = f.read().strip()
+        agent_id = f.read().strip()
 else:
-    AGENT_ID = str(uuid.uuid4())
+    agent_id = str(uuid.uuid4())
     with open(AGENT_ID_FILE, "w") as f:
-        f.write(AGENT_ID)
+        f.write(agent_id)
 
-print(f"Agent ID: {AGENT_ID}")
+print(f"Agent ID: {agent_id}")
 
-def register():
+# Connect to Redis
+r = Redis.from_url(REDIS_URL, decode_responses=True)
+
+# Register agent
+try:
+    res = requests.post(BASE_URL + "/register", json={"agent_id": agent_id})
+    if res.status_code == 200:
+        print("Registered with backend.")
+    else:
+        print("Failed to register:", res.text)
+except Exception as e:
+    print("Registration error:", e)
+
+print("Agent started. Polling for tasks...")
+
+while True:
     try:
-        res = requests.post(f"{BASE_URL}/register", json={"agent_id": AGENT_ID})
-        if res.status_code == 200:
-            print("Registered with backend.")
-        else:
-            print("Failed to register:", res.text)
-    except Exception as e:
-        print(f"Registration error: {e}")
+        task_raw = r.lpop(f"queue:{agent_id}")
+        if task_raw:
+            try:
+                task = ast.literal_eval(task_raw)
+                task_id = task.get("task_id")
+                command = task.get("command")
+                print(f"Received task: {task}")
 
-def poll_for_commands():
-    try:
-        res = requests.get(f"{BASE_URL}/poll/{AGENT_ID}")
-        if res.status_code == 200:
-            task = res.json()
-            if task and "task_id" in task and "command" in task:
-                print(f"Executing command: {task['command']}")
-                output = run_command(task["command"])
-                submit_result(task["task_id"], output)
-    except Exception as e:
-        print(f"Polling error: {e}")
+                try:
+                    output = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=15)
+                    output_text = output.decode().strip()
+                except subprocess.CalledProcessError as e:
+                    output_text = f"[Error] {e.output.decode().strip()}"
+                except Exception as e:
+                    output_text = f"[Exception] {str(e)}"
 
-def run_command(cmd):
-    try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        return result.stdout + result.stderr
+                r.set(f"result:{task_id}", output_text, ex=60)
+                print(f"Sent result for task {task_id}")
+            except Exception as e:
+                print(f"Error parsing task: {e}")
+        time.sleep(5)
     except Exception as e:
-        return str(e)
-
-def submit_result(task_id, output):
-    try:
-        res = requests.post(f"{BASE_URL}/result", json={
-            "task_id": task_id,
-            "output": output
-        })
-        if res.status_code == 200:
-            print("Result submitted.")
-        else:
-            print("Failed to submit result:", res.text)
-    except Exception as e:
-        print(f"Submit error: {e}")
-
-# === Main Loop ===
-if __name__ == "__main__":
-    print("Agent started. Polling for tasks...")
-    register()
-    while True:
-        poll_for_commands()
+        print(f"Unexpected error: {e}")
         time.sleep(5)
